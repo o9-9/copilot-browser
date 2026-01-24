@@ -125,6 +125,9 @@ function setupIpcHandlers() {
                 takeScreenshot: async () => {
                     return tabManager?.takeScreenshot() || null;
                 },
+                pressKey: async (key) => {
+                    return tabManager?.pressKey(key) || false;
+                },
             });
         }
         return copilotService.initialize();
@@ -227,7 +230,19 @@ function createMenu() {
                 { type: 'separator' },
                 { role: 'togglefullscreen' },
                 { type: 'separator' },
-                { role: 'toggleDevTools' }
+                { 
+                    label: 'Toggle Developer Tools',
+                    accelerator: 'F12',
+                    click: () => mainWindow?.webContents.toggleDevTools()
+                },
+                { type: 'separator' },
+                {
+                    label: 'Toggle Sidebar',
+                    accelerator: 'Ctrl+Shift+I',
+                    click: () => {
+                        mainWindow?.webContents.send('sidebar:toggle');
+                    }
+                }
             ]
         },
         {

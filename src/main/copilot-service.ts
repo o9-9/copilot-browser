@@ -31,6 +31,7 @@ export interface BrowserToolCallbacks {
     searchInPage: (text: string) => Promise<{ found: boolean; matches: string[] }>;
     getVisualDescription: () => Promise<string>;
     saveScreenshotToFile: () => Promise<string | null>;
+    pressKey: (key: string) => Promise<boolean>;
 }
 
 // Wrap tool handlers with timeout
@@ -76,6 +77,7 @@ export class CopilotService {
     private onToolResult: ((toolName: string, result: string) => void) | null = null;
     private sessionErrorCount: number = 0;
     private readonly MAX_SESSION_ERRORS = 3;
+    private activeStreamCleanup: (() => void) | null = null;
 
     async initialize(): Promise<boolean> {
         try {
@@ -199,6 +201,10 @@ If you've opened multiple tabs trying to find something please close the old unu
 - **YouTube Videos**: YouTube videos automatically play when opened, theres no need to click play.
 - **Tab management**: If you have more than 2 tabs open, close any that are not needed using browser_close_tabs to keep your workspace tidy. Make sure to not continue opening new tabs without closing old ones. and dont close the active tab unless instructed. and dont close tabs opened by the user. Make sure after completing a task to list open tabs using browser_get_open_tabs and close any unneeded ones.
 </best_practices>
+
+<never_do>
+Never use any tools or take any actions outside of the provided browser tools. You ARE a BROWSER AUTOMATION AGENT.
+</never_do>
 `,
             },
         });
@@ -470,6 +476,32 @@ If you've opened multiple tabs trying to find something please close the old unu
                     } catch (error: any) {
                         const msg = `Failed to type: ${error.message || 'unknown error'}`;
                         reportResult('browser_type_text', msg);
+                        return msg;
+                    }
+                },
+            }),
+            defineToolFn('browser_press_key', {
+                description: 'Press a specific key or key combination (e.g., "Enter", "Tab", "ArrowDown", "Control+C"). Use this for navigation, shortcuts, or submitting forms without a submit button.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        key: {
+                            type: 'string',
+                            description: 'The key or combination to press (e.g. "Enter", "a", "Control+a")',
+                        },
+                    },
+                    required: ['key'],
+                },
+                handler: async (args: { key: string }) => {
+                    if (!callbacks || !callbacks.pressKey) return 'Press key capability not available';
+                    try {
+                        const success = await withTimeout(callbacks.pressKey(args.key), 5000);
+                        const msg = success ? `Pressed key: "${args.key}"` : `Failed to press key: "${args.key}"`;
+                        reportResult('browser_press_key', msg);
+                        return msg;
+                    } catch (error: any) {
+                        const msg = `Failed to press key: ${error.message || 'unknown error'}`;
+                        reportResult('browser_press_key', msg);
                         return msg;
                     }
                 },
@@ -885,6 +917,12 @@ If you've opened multiple tabs trying to find something please close the old unu
             throw new Error('Session not created');
         }
 
+        // Ensure any previous stream is cleaned up to prevent duplicate listeners
+        if (this.activeStreamCleanup) {
+            console.log('Cleaning up previous active stream before starting new one');
+            this.activeStreamCleanup();
+        }
+
         this.conversationHistory.push({ role: 'user', content: message });
 
         return new Promise((resolve, reject) => {
@@ -936,6 +974,14 @@ If you've opened multiple tabs trying to find something please close the old unu
                     idleTimeout = null;
                 }
                 this.onToolResult = null;
+                this.activeStreamCleanup = null;
+            };
+
+            // Register global cleanup for abort/new stream
+            this.activeStreamCleanup = () => {
+                cleanup();
+                // Resolve with partial content if aborted/interrupted
+                resolve(fullContent);
             };
 
             // Set up tool result listener to capture exact output from handlers
@@ -1109,7 +1155,32 @@ If you've opened multiple tabs trying to find something please close the old unu
         this.conversationHistory = [];
     }
 
+    async resetSession(): Promise<void> {
+        // Clear conversation history
+        this.conversationHistory = [];
+        
+        // Destroy existing session and create a fresh one
+        if (this.session) {
+            try {
+                await this.session.destroy();
+            } catch (e) {
+                // Ignore session cleanup errors
+            }
+            this.session = null;
+        }
+        
+        // Create a fresh session
+        await this.createSession();
+        console.log('Copilot session reset - context cleared');
+    }
+
     async abort(): Promise<void> {
+        // First cleanup any active stream listeners
+        if (this.activeStreamCleanup) {
+            console.log('Aborting active stream listener...');
+            this.activeStreamCleanup();
+        }
+
         if (this.session) {
             try {
                 await this.session.abort();

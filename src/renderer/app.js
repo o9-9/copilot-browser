@@ -120,7 +120,24 @@ function setupEventListeners() {
     elements.minimizeBtn.addEventListener('click', () => window.electronAPI.minimize());
     elements.maximizeBtn.addEventListener('click', () => window.electronAPI.maximize());
     elements.closeBtn.addEventListener('click', () => window.electronAPI.close());
-    
+
+    // Window state listener for maximize/restore icon toggle
+    window.electronAPI.onWindowStateChanged((state) => {
+        const maximizeBtn = elements.maximizeBtn;
+        const iconMaximize = maximizeBtn.querySelector('.icon-maximize');
+        const iconRestore = maximizeBtn.querySelector('.icon-restore');
+        
+        if (state.isMaximized) {
+            maximizeBtn.title = "Restore";
+            if (iconMaximize) iconMaximize.style.display = 'none';
+            if (iconRestore) iconRestore.style.display = 'block';
+        } else {
+            maximizeBtn.title = "Maximize";
+            if (iconMaximize) iconMaximize.style.display = 'block';
+            if (iconRestore) iconRestore.style.display = 'none';
+        }
+    });
+
     // Tabs
     elements.newTabBtn.addEventListener('click', () => window.electronAPI.newTab());
 
@@ -408,17 +425,41 @@ function setupIpcListeners() {
             addMessage('assistant', result, false, assistantMsg.id);
         } else if (streamingMessage) {
             // Save the streamed content
-            // We need to extract the full text from the DOM elements because it came in chunks
-            const textBlocks = streamingMessage.querySelectorAll('.message-text');
+            // We need to extract the full structure from the DOM elements
+            const messageBlocksDiv = streamingMessage.querySelector('.message-blocks');
+            const childNodes = messageBlocksDiv ? Array.from(messageBlocksDiv.children) : [];
+            const blocks = [];
             let fullText = '';
-            textBlocks.forEach(block => fullText += block.getAttribute('data-raw') || '');
+            
+            childNodes.forEach(node => {
+                if (node.classList.contains('message-text')) {
+                     const text = node.getAttribute('data-raw') || '';
+                     blocks.push({ type: 'text', content: text });
+                     fullText += text;
+                } else if (node.classList.contains('status-block')) {
+                     if (node.classList.contains('thinking')) {
+                         const content = node.querySelector('.status-content').getAttribute('data-raw') || '';
+                         blocks.push({ type: 'thinking', content: content });
+                     } else if (node.classList.contains('tool')) {
+                         const name = node.dataset.name || 'Tool';
+                         const result = node.querySelector('.status-content').getAttribute('data-raw') || '';
+                         blocks.push({ type: 'tool', name: name, result: result });
+                     }
+                }
+            });
             
             // Get ID from DOM if possible, otherwise generate
             const msgId = streamingMessage.dataset.id || ('asst-' + Date.now());
             // Ensure ID is set on DOM if it wasn't
             if (!streamingMessage.dataset.id) streamingMessage.dataset.id = msgId;
 
-            const assistantMsg = { id: msgId, role: 'assistant', content: fullText, timestamp: Date.now() };
+            const assistantMsg = { 
+                id: msgId, 
+                role: 'assistant', 
+                content: fullText, // Plain text for previews
+                blocks: blocks,    // Structured data for restoring UI
+                timestamp: Date.now() 
+            };
             state.messages.push(assistantMsg);
         }
         
@@ -434,6 +475,10 @@ function setupIpcListeners() {
     
     window.electronAPI.onShowAbout(() => {
         showAboutModal();
+    });
+
+    window.electronAPI.onSidebarToggle(() => {
+        toggleSidebar();
     });
 
     // Handle Zero State visibility
@@ -635,8 +680,9 @@ async function sendMessage() {
         } catch (error) {
             console.error('Failed to get page content:', error);
         }
-        state.includePageContent = false;
-        elements.getPageBtn.classList.remove('active');
+        // Keep context enabled for subsequent messages
+        // state.includePageContent = false;
+        // elements.getPageBtn.classList.remove('active');
     }
     
     // Clear welcome message if it's the first message
@@ -644,9 +690,9 @@ async function sendMessage() {
     if (welcomeMsg) {
         welcomeMsg.remove();
         // Start new session
-        startNewSession();
+        await startNewSession();
     } else if (!state.currentSessionId) {
-        startNewSession();
+        await startNewSession();
     }
     
     // Add user message
@@ -671,9 +717,16 @@ async function sendMessage() {
     window.electronAPI.startStream(fullMessage, state.currentModel);
 }
 
-function startNewSession() {
+async function startNewSession() {
     state.currentSessionId = Date.now().toString();
     state.messages = [];
+    
+    // Reset the Copilot session context on the backend
+    try {
+        await window.electronAPI.resetSession();
+    } catch (err) {
+        console.warn('Failed to reset Copilot session:', err);
+    }
 }
 
 function saveCurrentSession() {
@@ -704,10 +757,12 @@ function saveCurrentSession() {
 // Update handleStreamEvent to save assistant messages
 function handleStreamEvent(event) {
     if (event.type === 'content') {
+        closeActiveThinkingBlock();
         appendToLastMessage(event.data);
     } else if (event.type === 'thinking_delta') {
         updateThinkingBlock(event.data);
     } else if (event.type === 'tool_start') {
+        closeActiveThinkingBlock();
         createToolBlock(event.data.id, event.data.name);
     } else if (event.type === 'tool_end') {
         completeToolBlock(event.data.id, event.data.result);
@@ -730,7 +785,7 @@ function updateSendButton() {
     }
 }
 
-function addMessage(role, content, isStreaming = false, id = null) {
+function addMessage(role, content, isStreaming = false, id = null, blocks = null) {
     const messageEl = document.createElement('div');
     messageEl.className = 'message';
     messageEl.dataset.role = role;
@@ -745,10 +800,10 @@ function addMessage(role, content, isStreaming = false, id = null) {
     avatar.className = `message-avatar ${role}`;
     // Use sparkle/copilot icon for assistant, user initial for user
     if (role === 'user') {
-        avatar.innerHTML = 'U';
+        avatar.innerHTML = '<i class="fa-solid fa-user"></i>';
     } else {
-        // Copilot sparkle icon
-        avatar.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M7.998 15.035c-4.562 0-7.873-2.914-7.998-3.749V9.338c.085-.628.677-1.686 1.588-2.065.013-.07.024-.143.036-.218.029-.183.06-.384.126-.612-.201-.508-.254-1.084-.254-1.656 0-.87.128-1.769.693-2.484C2.875 1.452 3.91 1 5.159 1c.894 0 1.724.237 2.383.674C8.152 1.248 8.967 1 9.9 1c1.255 0 2.251.452 2.907 1.293.578.715.678 1.614.678 2.484 0 .572-.053 1.148-.254 1.656.066.228.097.43.126.612.012.076.023.148.036.218.911.379 1.503 1.437 1.588 2.065v1.948c-.127.836-3.438 3.759-7.983 3.759zM3.85 6.15c-.175.606-.26 1.237-.261 1.848v1.166c0 .458.096.866.328 1.183.227.316.57.53 1.01.619.232.046.405.246.389.478-.015.232-.202.418-.435.418h-.069a2.52 2.52 0 01-.315-.069 2.47 2.47 0 01-1.59-.998 3.025 3.025 0 01-.462-1.631V7.998c.001-.644.092-1.312.276-1.948.126-.44.296-.844.5-1.2.123-.212.254-.407.391-.576.137-.168.283-.31.422-.403a.437.437 0 01.466.05c.15.116.175.332.047.489a3.95 3.95 0 00-.697 1.74zm8.3 0a3.95 3.95 0 00-.697-1.74.363.363 0 01.047-.489.437.437 0 01.466-.05c.139.093.285.235.422.403.137.169.268.364.391.576.204.356.374.76.5 1.2.184.636.275 1.304.276 1.948v1.166c0 .56-.155 1.119-.462 1.631a2.47 2.47 0 01-1.59.998 2.52 2.52 0 01-.315.069h-.069c-.233 0-.42-.186-.435-.418-.016-.232.157-.432.389-.478.44-.089.783-.303 1.01-.619.232-.317.328-.725.328-1.183V7.998c-.001-.611-.086-1.242-.261-1.848z"></path></svg>';
+        // Copilot logo icon
+        avatar.innerHTML = '<svg viewBox="0 0 512 416" width="14" height="14" fill="currentColor"><path d="M181.33 266.143c0-11.497 9.32-20.818 20.818-20.818 11.498 0 20.819 9.321 20.819 20.818v38.373c0 11.497-9.321 20.818-20.819 20.818-11.497 0-20.818-9.32-20.818-20.818v-38.373zM308.807 245.325c-11.477 0-20.798 9.321-20.798 20.818v38.373c0 11.497 9.32 20.818 20.798 20.818 11.497 0 20.818-9.32 20.818-20.818v-38.373c0-11.497-9.32-20.818-20.818-20.818z" fill-rule="nonzero"/><path d="M512.002 246.393v57.384c-.02 7.411-3.696 14.638-9.67 19.011C431.767 374.444 344.695 416 256 416c-98.138 0-196.379-56.542-246.33-93.21-5.975-4.374-9.65-11.6-9.671-19.012v-57.384a35.347 35.347 0 016.857-20.922l15.583-21.085c8.336-11.312 20.757-14.31 33.98-14.31 4.988-56.953 16.794-97.604 45.024-127.354C155.194 5.77 226.56 0 256 0c29.441 0 100.807 5.77 154.557 62.722 28.19 29.75 40.036 70.401 45.025 127.354 13.263 0 25.602 2.936 33.958 14.31l15.583 21.127c4.476 6.077 6.878 13.345 6.878 20.88zm-97.666-26.075c-.677-13.058-11.292-18.19-22.338-21.824-11.64 7.309-25.848 10.183-39.46 10.183-14.454 0-41.432-3.47-63.872-25.869-5.667-5.625-9.527-14.454-12.155-24.247a212.902 212.902 0 00-20.469-1.088c-6.098 0-13.099.349-20.551 1.088-2.628 9.793-6.509 18.622-12.155 24.247-22.4 22.4-49.418 25.87-63.872 25.87-13.612 0-27.86-2.855-39.501-10.184-11.005 3.613-21.558 8.828-22.277 21.824-1.17 24.555-1.272 49.11-1.375 73.645-.041 12.318-.082 24.658-.288 36.976.062 7.166 4.374 13.818 10.882 16.774 52.97 24.124 103.045 36.278 149.137 36.278 46.01 0 96.085-12.154 149.014-36.278 6.508-2.956 10.84-9.608 10.881-16.774.637-36.832.124-73.809-1.642-110.62h.041zM107.521 168.97c8.643 8.623 24.966 14.392 42.56 14.392 13.448 0 39.03-2.874 60.156-24.329 9.28-8.951 15.05-31.35 14.413-54.079-.657-18.231-5.769-33.28-13.448-39.665-8.315-7.371-27.203-10.574-48.33-8.644-22.399 2.238-41.267 9.588-50.875 19.833-20.798 22.728-16.323 80.317-4.476 92.492zm130.556-56.008c.637 3.51.965 7.35 1.273 11.517 0 2.875 0 5.77-.308 8.952 6.406-.636 11.847-.636 16.959-.636s10.553 0 16.959.636c-.329-3.182-.329-6.077-.329-8.952.329-4.167.657-8.007 1.294-11.517-6.735-.637-12.812-.965-17.924-.965s-11.21.328-17.924.965zm49.275-8.008c-.637 22.728 5.133 45.128 14.413 54.08 21.105 21.454 46.708 24.328 60.155 24.328 17.596 0 33.918-5.769 42.561-14.392 11.847-12.175 16.322-69.764-4.476-92.492-9.608-10.245-28.476-17.595-50.875-19.833-21.127-1.93-40.015 1.273-48.33 8.644-7.679 6.385-12.791 21.434-13.448 39.665z"/></svg>';
     }
     
     const contentWrapper = document.createElement('div');
@@ -762,7 +817,42 @@ function addMessage(role, content, isStreaming = false, id = null) {
     const messageBlocks = document.createElement('div');
     messageBlocks.className = 'message-blocks';
     
-    if (content) {
+    if (blocks && blocks.length > 0) {
+        blocks.forEach(block => {
+            if (block.type === 'text') {
+                 const textBlock = document.createElement('div');
+                 textBlock.className = 'message-text';
+                 textBlock.innerHTML = formatMarkdown(block.content);
+                 textBlock.setAttribute('data-raw', block.content);
+                 messageBlocks.appendChild(textBlock);
+            } else if (block.type === 'thinking') {
+                 const thinkingBlock = document.createElement('div');
+                 thinkingBlock.className = 'status-block thinking completed'; 
+                 thinkingBlock.innerHTML = `
+                    <div class="status-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <div class="status-icon"><i class="fa-solid fa-check"></i></div>
+                        <div class="status-title">Finished thinking</div>
+                        <svg class="status-chevron" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"></path></svg>
+                    </div>
+                    <div class="status-content" data-raw="${escapeHtml(block.content)}">${escapeHtml(block.content)}</div>
+                 `;
+                 messageBlocks.appendChild(thinkingBlock);
+            } else if (block.type === 'tool') {
+                 const toolBlock = document.createElement('div');
+                 toolBlock.className = 'status-block tool completed';
+                 toolBlock.dataset.name = block.name;
+                 toolBlock.innerHTML = `
+                    <div class="status-header" onclick="this.parentElement.classList.toggle('expanded')">
+                        <div class="status-icon"><svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg></div>
+                        <div class="status-title">Used ${escapeHtml(block.name)}</div>
+                         <svg class="status-chevron" viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"></path></svg>
+                    </div>
+                    <div class="status-content" data-raw="${escapeHtml(block.result)}">${formatMarkdown(block.result)}</div>
+                 `;
+                 messageBlocks.appendChild(toolBlock);
+            }
+        });
+    } else if (content) {
         const textBlock = document.createElement('div');
         textBlock.className = 'message-text';
         textBlock.innerHTML = formatMarkdown(content);
@@ -782,7 +872,7 @@ function addMessage(role, content, isStreaming = false, id = null) {
         const copyBtn = document.createElement('button');
         copyBtn.className = 'action-btn';
         copyBtn.title = 'Copy response';
-        copyBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 15h-7.5A1.75 1.75 0 0 1 0 13.25V6.75Zm5-3.25C5 2.536 5.784 1.75 6.75 1.75h3.5c.966 0 1.75.784 1.75 1.75v3.5A1.75 1.75 0 0 1 10.25 8.75h-3.5A1.75 1.75 0 0 1 5 7V3.5Zm1.75-.25a.25.25 0 0 0-.25.25v3.5c0 .138.112.25.25.25h3.5a.25.25 0 0 0 .25-.25v-3.5a.25.25 0 0 0-.25-.25h-3.5Z"></path></svg>';
+        copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i>';
         
         copyBtn.addEventListener('click', () => {
              const textBlocks = messageBlocks.querySelectorAll('.message-text');
@@ -796,7 +886,7 @@ function addMessage(role, content, isStreaming = false, id = null) {
              window.electronAPI.copyToClipboard(fullText);
              
              const originalIcon = copyBtn.innerHTML;
-             copyBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+             copyBtn.innerHTML = '<i class="fa-solid fa-check"></i>';
              copyBtn.classList.add('success');
              setTimeout(() => {
                  copyBtn.innerHTML = originalIcon;
@@ -808,7 +898,7 @@ function addMessage(role, content, isStreaming = false, id = null) {
         const retryBtn = document.createElement('button');
         retryBtn.className = 'action-btn';
         retryBtn.title = 'Rerun prompt';
-        retryBtn.innerHTML = '<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M1.705 8.005a.75.75 0 0 1 .834.656 5.5 5.5 0 0 0 9.592 2.97l-1.204-1.204a.25.25 0 0 1 .177-.427h3.646a.25.25 0 0 1 .25.25v3.646a.25.25 0 0 1-.427.177l-1.38-1.38A7.002 7.002 0 0 1 1.05 8.84a.75.75 0 0 1 .656-.834ZM8 2.5a5.487 5.487 0 0 0-4.131 1.869l1.204 1.204A.25.25 0 0 1 4.896 6H1.25A.25.25 0 0 1 1 5.75V2.104a.25.25 0 0 1 .427-.177l1.38 1.38A7.002 7.002 0 0 1 14.95 7.16a.75.75 0 0 1-1.49.178A5.5 5.5 0 0 0 8 2.5Z"></path></svg>';
+        retryBtn.innerHTML = '<i class="fa-solid fa-arrow-rotate-right"></i>';
         
         retryBtn.addEventListener('click', () => {
             let prev = messageEl.previousElementSibling;
@@ -872,9 +962,9 @@ function clearChat() {
     elements.chatMessages.innerHTML = `
         <div class="welcome-message">
             <div class="welcome-icon">
-                <svg viewBox="0 0 16 16" width="48" height="48" fill="currentColor">
-                    <path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"></path>
-                </svg>
+                <svg viewBox="0 0 512 416" width="48" height="39" fill="currentColor">
+                    <path d="M181.33 266.143c0-11.497 9.32-20.818 20.818-20.818 11.498 0 20.819 9.321 20.819 20.818v38.373c0 11.497-9.321 20.818-20.819 20.818-11.497 0-20.818-9.32-20.818-20.818v-38.373zM308.807 245.325c-11.477 0-20.798 9.321-20.798 20.818v38.373c0 11.497 9.32 20.818 20.798 20.818 11.497 0 20.818-9.32 20.818-20.818v-38.373c0-11.497-9.32-20.818-20.818-20.818z" fill-rule="nonzero"/>
+                    <path d="M512.002 246.393v57.384c-.02 7.411-3.696 14.638-9.67 19.011C431.767 374.444 344.695 416 256 416c-98.138 0-196.379-56.542-246.33-93.21-5.975-4.374-9.65-11.6-9.671-19.012v-57.384a35.347 35.347 0 016.857-20.922l15.583-21.085c8.336-11.312 20.757-14.31 33.98-14.31 4.988-56.953 16.794-97.604 45.024-127.354C155.194 5.77 226.56 0 256 0c29.441 0 100.807 5.77 154.557 62.722 28.19 29.75 40.036 70.401 45.025 127.354 13.263 0 25.602 2.936 33.958 14.31l15.583 21.127c4.476 6.077 6.878 13.345 6.878 20.88zm-97.666-26.075c-.677-13.058-11.292-18.19-22.338-21.824-11.64 7.309-25.848 10.183-39.46 10.183-14.454 0-41.432-3.47-63.872-25.869-5.667-5.625-9.527-14.454-12.155-24.247a212.902 212.902 0 00-20.469-1.088c-6.098 0-13.099.349-20.551 1.088-2.628 9.793-6.509 18.622-12.155 24.247-22.4 22.4-49.418 25.87-63.872 25.87-13.612 0-27.86-2.855-39.501-10.184-11.005 3.613-21.558 8.828-22.277 21.824-1.17 24.555-1.272 49.11-1.375 73.645-.041 12.318-.082 24.658-.288 36.976.062 7.166 4.374 13.818 10.882 16.774 52.97 24.124 103.045 36.278 149.137 36.278 46.01 0 96.085-12.154 149.014-36.278 6.508-2.956 10.84-9.608 10.881-16.774.637-36.832.124-73.809-1.642-110.62h.041zM107.521 168.97c8.643 8.623 24.966 14.392 42.56 14.392 13.448 0 39.03-2.874 60.156-24.329 9.28-8.951 15.05-31.35 14.413-54.079-.657-18.231-5.769-33.28-13.448-39.665-8.315-7.371-27.203-10.574-48.33-8.644-22.399 2.238-41.267 9.588-50.875 19.833-20.798 22.728-16.323 80.317-4.476 92.492zm130.556-56.008c.637 3.51.965 7.35 1.273 11.517 0 2.875 0 5.77-.308 8.952 6.406-.636 11.847-.636 16.959-.636s10.553 0 16.959.636c-.329-3.182-.329-6.077-.329-8.952.329-4.167.657-8.007 1.294-11.517-6.735-.637-12.812-.965-17.924-.965s-11.21.328-17.924.965zm49.275-8.008c-.637 22.728 5.133 45.128 14.413 54.08 21.105 21.454 46.708 24.328 60.155 24.328 17.596 0 33.918-5.769 42.561-14.392 11.847-12.175 16.322-69.764-4.476-92.492-9.608-10.245-28.476-17.595-50.875-19.833-21.127-1.93-40.015 1.273-48.33 8.644-7.679 6.385-12.791 21.434-13.448 39.665z"/></svg>
             </div>
             <h2>How can I help you?</h2>
             <p>I can help you browse the web, answer questions, and summarize content.</p>
@@ -908,9 +998,14 @@ function updateThinkingBlock(chunk) {
     }
 
     const blocksContainer = streamingMessage.querySelector('.message-blocks');
-    let thinkingBlock = blocksContainer.querySelector('.status-block.thinking');
-
-    if (!thinkingBlock) {
+    const lastBlock = blocksContainer.lastElementChild;
+    let thinkingBlock;
+    
+    // Check if the last block is a thinking block we can append to
+    if (lastBlock && lastBlock.classList.contains('status-block') && lastBlock.classList.contains('thinking')) {
+        thinkingBlock = lastBlock;
+    } else {
+        // Create new thinking block at the end
         thinkingBlock = document.createElement('div');
         thinkingBlock.className = 'status-block thinking expanded';
         thinkingBlock.innerHTML = `
@@ -923,13 +1018,7 @@ function updateThinkingBlock(chunk) {
             </div>
             <div class="status-content"></div>
         `;
-        // Insert before any text content
-        const firstText = blocksContainer.querySelector('.message-text');
-        if (firstText) {
-            blocksContainer.insertBefore(thinkingBlock, firstText);
-        } else {
-            blocksContainer.prepend(thinkingBlock);
-        }
+        blocksContainer.appendChild(thinkingBlock);
     }
 
     const contentDiv = thinkingBlock.querySelector('.status-content');
@@ -938,9 +1027,34 @@ function updateThinkingBlock(chunk) {
     contentDiv.setAttribute('data-raw', newText);
     contentDiv.textContent = newText;
     
-    // Always keep expanded while streaming thinking
-    thinkingBlock.classList.add('expanded');
+    // Always keep expanded while streaming this specific block
+    if (!thinkingBlock.classList.contains('expanded')) {
+        thinkingBlock.classList.add('expanded');
+    }
+    
     scrollToBottom();
+}
+
+function closeActiveThinkingBlock() {
+    let streamingMessage = elements.chatMessages.querySelector('[data-streaming="true"]');
+    if (streamingMessage) {
+        const blocksContainer = streamingMessage.querySelector('.message-blocks');
+        const lastBlock = blocksContainer.lastElementChild;
+        if (lastBlock && lastBlock.classList.contains('status-block') && lastBlock.classList.contains('thinking')) {
+            if (!lastBlock.classList.contains('completed')) {
+                lastBlock.classList.remove('expanded');
+                lastBlock.classList.add('completed');
+                
+                const title = lastBlock.querySelector('.status-title');
+                if (title) title.textContent = 'Finished thinking';
+                
+                const icon = lastBlock.querySelector('.status-icon');
+                if (icon) {
+                    icon.innerHTML = '<i class="fa-solid fa-check"></i>';
+                }
+            }
+        }
+    }
 }
 
 function createToolBlock(id, name) {
@@ -959,6 +1073,7 @@ function createToolBlock(id, name) {
     const block = document.createElement('div');
     block.className = 'status-block tool expanded';
     block.id = `tool-${id}`;
+    block.dataset.name = name;
     block.innerHTML = `
         <div class="status-header" onclick="this.parentElement.classList.toggle('expanded')">
             <div class="status-icon spinning">
@@ -988,6 +1103,10 @@ function completeToolBlock(id, result) {
             const content = block.querySelector('.status-content');
             content.innerHTML = `<img src="${result}" style="max-width: 100%; border-radius: 4px; border: 1px solid var(--border-default);" alt="Screenshot">`;
             // Don't set text content if we set innerHTML
+            // Also clear the spinning state and update the icon for images
+            const icon = block.querySelector('.status-icon');
+            icon.classList.remove('spinning');
+            icon.innerHTML = `<svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.75.75 0 0 1 1.06-1.06L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>`;
             return;
         }
 
@@ -1054,13 +1173,14 @@ function addThinkingIndicator() {
     if (document.getElementById('thinking-indicator')) return;
     
     const indicator = document.createElement('div');
-    indicator.className = 'thinking-indicator';
+    // Use message class to ensure identical padding and alignment with other messages
+    indicator.className = 'message thinking-indicator';
     indicator.id = 'thinking-indicator';
     indicator.innerHTML = `
-        <div class="thinking-avatar">
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M7.998 15.035c-4.562 0-7.873-2.914-7.998-3.749V9.338c.085-.628.677-1.686 1.588-2.065.013-.07.024-.143.036-.218.029-.183.06-.384.126-.612-.201-.508-.254-1.084-.254-1.656 0-.87.128-1.769.693-2.484C2.875 1.452 3.91 1 5.159 1c.894 0 1.724.237 2.383.674C8.152 1.248 8.967 1 9.9 1c1.255 0 2.251.452 2.907 1.293.578.715.678 1.614.678 2.484 0 .572-.053 1.148-.254 1.656.066.228.097.43.126.612.012.076.023.148.036.218.911.379 1.503 1.437 1.588 2.065v1.948c-.127.836-3.438 3.759-7.983 3.759zM3.85 6.15c-.175.606-.26 1.237-.261 1.848v1.166c0 .458.096.866.328 1.183.227.316.57.53 1.01.619.232.046.405.246.389.478-.015.232-.202.418-.435.418h-.069a2.52 2.52 0 01-.315-.069 2.47 2.47 0 01-1.59-.998 3.025 3.025 0 01-.462-1.631V7.998c.001-.644.092-1.312.276-1.948.126-.44.296-.844.5-1.2.123-.212.254-.407.391-.576.137-.168.283-.31.422-.403a.437.437 0 01.466.05c.15.116.175.332.047.489a3.95 3.95 0 00-.697 1.74zm8.3 0a3.95 3.95 0 00-.697-1.74.363.363 0 01.047-.489.437.437 0 01.466-.05c.139.093.285.235.422.403.137.169.268.364.391.576.204.356.374.76.5 1.2.184.636.275 1.304.276 1.948v1.166c0 .56-.155 1.119-.462 1.631a2.47 2.47 0 01-1.59.998 2.52 2.52 0 01-.315.069h-.069c-.233 0-.42-.186-.435-.418-.016-.232.157-.432.389-.478.44-.089.783-.303 1.01-.619.232-.317.328-.725.328-1.183V7.998c-.001-.611-.086-1.242-.261-1.848z"></path></svg>
+        <div class="message-avatar assistant">
+            <svg viewBox="0 0 512 416" width="14" height="14" fill="currentColor"><path d="M181.33 266.143c0-11.497 9.32-20.818 20.818-20.818 11.498 0 20.819 9.321 20.819 20.818v38.373c0 11.497-9.321 20.818-20.819 20.818-11.497 0-20.818-9.32-20.818-20.818v-38.373zM308.807 245.325c-11.477 0-20.798 9.321-20.798 20.818v38.373c0 11.497 9.32 20.818 20.798 20.818 11.497 0 20.818-9.32 20.818-20.818v-38.373c0-11.497-9.32-20.818-20.818-20.818z" fill-rule="nonzero"/><path d="M512.002 246.393v57.384c-.02 7.411-3.696 14.638-9.67 19.011C431.767 374.444 344.695 416 256 416c-98.138 0-196.379-56.542-246.33-93.21-5.975-4.374-9.65-11.6-9.671-19.012v-57.384a35.347 35.347 0 016.857-20.922l15.583-21.085c8.336-11.312 20.757-14.31 33.98-14.31 4.988-56.953 16.794-97.604 45.024-127.354C155.194 5.77 226.56 0 256 0c29.441 0 100.807 5.77 154.557 62.722 28.19 29.75 40.036 70.401 45.025 127.354 13.263 0 25.602 2.936 33.958 14.31l15.583 21.127c4.476 6.077 6.878 13.345 6.878 20.88zm-97.666-26.075c-.677-13.058-11.292-18.19-22.338-21.824-11.64 7.309-25.848 10.183-39.46 10.183-14.454 0-41.432-3.47-63.872-25.869-5.667-5.625-9.527-14.454-12.155-24.247a212.902 212.902 0 00-20.469-1.088c-6.098 0-13.099.349-20.551 1.088-2.628 9.793-6.509 18.622-12.155 24.247-22.4 22.4-49.418 25.87-63.872 25.87-13.612 0-27.86-2.855-39.501-10.184-11.005 3.613-21.558 8.828-22.277 21.824-1.17 24.555-1.272 49.11-1.375 73.645-.041 12.318-.082 24.658-.288 36.976.062 7.166 4.374 13.818 10.882 16.774 52.97 24.124 103.045 36.278 149.137 36.278 46.01 0 96.085-12.154 149.014-36.278 6.508-2.956 10.84-9.608 10.881-16.774.637-36.832.124-73.809-1.642-110.62h.041zM107.521 168.97c8.643 8.623 24.966 14.392 42.56 14.392 13.448 0 39.03-2.874 60.156-24.329 9.28-8.951 15.05-31.35 14.413-54.079-.657-18.231-5.769-33.28-13.448-39.665-8.315-7.371-27.203-10.574-48.33-8.644-22.399 2.238-41.267 9.588-50.875 19.833-20.798 22.728-16.323 80.317-4.476 92.492zm130.556-56.008c.637 3.51.965 7.35 1.273 11.517 0 2.875 0 5.77-.308 8.952 6.406-.636 11.847-.636 16.959-.636s10.553 0 16.959.636c-.329-3.182-.329-6.077-.329-8.952.329-4.167.657-8.007 1.294-11.517-6.735-.637-12.812-.965-17.924-.965s-11.21.328-17.924.965zm49.275-8.008c-.637 22.728 5.133 45.128 14.413 54.08 21.105 21.454 46.708 24.328 60.155 24.328 17.596 0 33.918-5.769 42.561-14.392 11.847-12.175 16.322-69.764-4.476-92.492-9.608-10.245-28.476-17.595-50.875-19.833-21.127-1.93-40.015 1.273-48.33 8.644-7.679 6.385-12.791 21.434-13.448 39.665z"/></svg>
         </div>
-        <div class="thinking-content">
+        <div class="message-content">
             <div class="thinking-dots">
                 <span></span>
                 <span></span>
@@ -1211,11 +1331,18 @@ function renderHistoryList(sessions) {
         // Delete button
         item.querySelector('.history-delete-btn').addEventListener('click', async (e) => {
             e.stopPropagation();
-            // Optional: Confirm dialog, but standard practice in these UIs is often direct or undo. 
-            // We'll stick to direct action if user wants quick management, or add confirm.
-            // User requested "closer to chat", clean.
             if (confirm('Delete this chat?')) {
                 await window.electronAPI.deleteSession(session.id);
+                
+                // If we deleted the active session, reset the current state
+                if (state.currentSessionId === session.id) {
+                    startNewChat();
+                    // Ensure focus isn't lost
+                    requestAnimationFrame(() => {
+                        elements.chatInput.focus();
+                    });
+                }
+                
                 loadHistory(); // Reload list
             }
         });
@@ -1239,7 +1366,7 @@ async function loadSession(id) {
     state.messages.forEach(msg => {
         // Ensure msg has ID if legacy
         if (!msg.id) msg.id = 'msg-' + Date.now() + Math.random().toString(36).substr(2, 5);
-        addMessage(msg.role, msg.content, false, msg.id);
+        addMessage(msg.role, msg.content, false, msg.id, msg.blocks);
     });
     
     closeHistoryModal();
@@ -1248,7 +1375,8 @@ async function loadSession(id) {
 async function clearAllHistory() {
     if (confirm('Are you sure you want to delete all chat history?')) {
         await window.electronAPI.clearHistory();
-        loadHistory();
+        closeHistoryModal();
+        startNewChat(); // Reset the current chat as well
     }
 }
 
@@ -1492,6 +1620,15 @@ function formatMarkdown(text) {
     // Links
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
     
+    // Auto-link raw URLs that haven't been processed
+    // Negative lookbehind ensures we don't double-link inside href attributes or existing anchor tags
+    html = html.replace(/(?<!href="|">)(https?:\/\/[^\s<]+)/g, (match) => {
+        // Remove trailing punctuation commonly found at end of sentences
+        const cleanMatch = match.replace(/[.,;:)]+$/, '');
+        const suffix = match.substring(cleanMatch.length);
+        return `<a href="${cleanMatch}" target="_blank" rel="noopener">${cleanMatch}</a>${suffix}`;
+    });
+
     // Lists
     html = html.replace(/^\s*[-*]\s+(.+)$/gm, '<li>$1</li>');
     html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');

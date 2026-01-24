@@ -53,6 +53,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     startStream: (message: string, model?: string) => 
         ipcRenderer.send('copilot:stream-start', message, model),
     abortStream: () => ipcRenderer.send('copilot:abort'),
+    resetSession: () => ipcRenderer.invoke('copilot:resetSession'),
     sendAnswer: (answers: any) => ipcRenderer.invoke('copilot:answer-user', answers),
 
     // Settings
@@ -110,6 +111,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.on('show:about', () => callback());
     },
     
+    // Sidebar Toggle Event
+    onSidebarToggle: (callback: () => void) => {
+        ipcRenderer.on('sidebar:toggle', () => callback());
+    },
+    
+    // Window State Event
+    onWindowStateChanged: (callback: (state: { isMaximized: boolean }) => void) => {
+        ipcRenderer.on('window:state-changed', (_event, state) => callback(state));
+    },
+    
     // Zero State Event
     onZeroStateChanged: (callback: (isZeroState: boolean) => void) => {
         ipcRenderer.on('tab:zero-state', (_event, isZeroState) => callback(isZeroState));
@@ -147,6 +158,7 @@ declare global {
             searchWeb: (query: string) => Promise<{ success: boolean; url: string }>;
             startStream: (message: string, model?: string) => void;
             abortStream: () => void;
+            resetSession: () => Promise<boolean>;
             sendAnswer: (answers: any) => Promise<boolean>;
             getSetting: (key: string) => Promise<unknown>;
             setSetting: (key: string, value: unknown) => Promise<boolean>;

@@ -58,6 +58,14 @@ function createMainWindow(): BrowserWindow {
         // Dev tools disabled by default - use Ctrl+Shift+I or View menu
     });
 
+    // Listen for window state changes
+    mainWindow.on('maximize', () => {
+        mainWindow?.webContents.send('window:state-changed', { isMaximized: true });
+    });
+    mainWindow.on('unmaximize', () => {
+        mainWindow?.webContents.send('window:state-changed', { isMaximized: false });
+    });
+
     // Save window bounds on close
     mainWindow.on('close', () => {
         if (mainWindow) {
@@ -223,6 +231,9 @@ function setupIpcHandlers(): void {
                 saveScreenshotToFile: async () => {
                     return tabManager?.saveScreenshotToFile() || null;
                 },
+                pressKey: async (key: string) => {
+                    return tabManager?.pressKey(key) || false;
+                },
             });
         }
         return copilotService.initialize();
@@ -273,6 +284,11 @@ function setupIpcHandlers(): void {
 
     ipcMain.on('copilot:abort', () => {
         copilotService?.abort();
+    });
+
+    ipcMain.handle('copilot:resetSession', async () => {
+        await copilotService?.resetSession();
+        return true;
     });
 
     // Settings
@@ -405,7 +421,19 @@ function createMenu(): void {
                 { type: 'separator' },
                 { role: 'togglefullscreen' },
                 { type: 'separator' },
-                { role: 'toggleDevTools' }
+                { 
+                    label: 'Toggle Developer Tools',
+                    accelerator: 'F12',
+                    click: () => mainWindow?.webContents.toggleDevTools()
+                },
+                { type: 'separator' },
+                {
+                    label: 'Toggle Sidebar',
+                    accelerator: 'Ctrl+Shift+I',
+                    click: () => {
+                        mainWindow?.webContents.send('sidebar:toggle');
+                    }
+                }
             ]
         },
         {

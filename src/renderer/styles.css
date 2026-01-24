@@ -217,14 +217,14 @@ html, body {
     border-bottom: 1px solid var(--border-default);
     -webkit-app-region: drag;
     user-select: none;
-    padding-left: 12px;
+    padding-left: 0px;
 }
 
 .title-bar-drag {
     display: flex;
     align-items: center;
     height: 100%;
-    width: 12px; /* Give it a width to act as a drag handle */
+    width: 4px; /* Give it a width to act as a drag handle */
 }
 
 .window-controls {
@@ -251,6 +251,14 @@ html, body {
     color: var(--text-primary);
 }
 
+.window-btn i {
+    font-size: 14px;
+}
+
+.nav-btn i {
+    font-size: 14px;
+}
+
 .window-btn.close-btn:hover {
     background-color: var(--danger);
     color: white;
@@ -270,7 +278,7 @@ html, body {
 
 #tabs-container {
     display: flex;
-    flex: 1;
+    flex: 0 1 auto;
     overflow-x: auto;
     overflow-y: hidden;
     gap: 0;

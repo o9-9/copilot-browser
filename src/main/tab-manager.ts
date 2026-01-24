@@ -1119,4 +1119,66 @@ export class TabManager {
             return null;
         }
     }
+
+    async pressKey(key: string): Promise<boolean> {
+        if (!this.activeTabId) return false;
+        
+        const view = this.tabs.get(this.activeTabId);
+        if (!view) return false;
+
+        try {
+            // Parse modifiers (e.g. "Control+Shift+A")
+            const parts = key.split('+');
+            let inputKey = parts.pop() || ''; // The last part is the key
+            const modifiers: string[] = [];
+            
+            parts.forEach(part => {
+                const p = part.toLowerCase().trim();
+                if (['ctrl', 'control'].includes(p)) modifiers.push('control');
+                if (['shift'].includes(p)) modifiers.push('shift');
+                if (['alt', 'option'].includes(p)) modifiers.push('alt');
+                if (['meta', 'cmd', 'command', 'super'].includes(p)) modifiers.push('meta'); // 'meta' is Command on Mac
+            });
+
+            // Map common keys to Electron accelerator format
+            const keyMap: {[key: string]: string} = {
+                 'arrowdown': 'Down', 'down': 'Down',
+                 'arrowup': 'Up', 'up': 'Up',
+                 'arrowleft': 'Left', 'left': 'Left',
+                 'arrowright': 'Right', 'right': 'Right',
+                 'enter': 'Enter', 'return': 'Enter',
+                 'tab': 'Tab',
+                 'space': 'Space',
+                 'backspace': 'Backspace',
+                 'delete': 'Delete',
+                 'escape': 'Escape', 'esc': 'Escape',
+                 'pagedown': 'PageDown', 'pgdn': 'PageDown',
+                 'pageup': 'PageUp', 'pgup': 'PageUp',
+                 'home': 'Home',
+                 'end': 'End',
+                 'insert': 'Insert'
+            };
+
+            const lowerKey = inputKey.toLowerCase();
+            const finalKeyCode = keyMap[lowerKey] || inputKey;
+            
+            // Send keyDown then keyUp with modifiers
+            view.webContents.sendInputEvent({ 
+                type: 'keyDown', 
+                keyCode: finalKeyCode,
+                modifiers: modifiers as any
+            });
+            
+            view.webContents.sendInputEvent({ 
+                type: 'keyUp', 
+                keyCode: finalKeyCode,
+                modifiers: modifiers as any
+            });
+            
+            return true;
+        } catch (error) {
+            console.error('Failed to press key:', error);
+            return false;
+        }
+    }
 }
