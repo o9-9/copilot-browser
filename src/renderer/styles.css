@@ -616,6 +616,8 @@ html, body {
     box-shadow: -4px 0 24px rgba(0,0,0,0.1);
     z-index: 100;
     position: relative;
+    container-type: inline-size;
+    container-name: sidebar;
 }
 
 #sidebar-resizer {
@@ -984,11 +986,15 @@ html, body {
     border-top: 1px solid var(--border-subtle);
     padding-top: 8px;
     margin-top: 4px;
+    gap: 8px; /* spacing between left controls and send button */
 }
 
 .left-controls {
     display: flex;
     gap: 4px;
+    flex: 1 1 0; /* allow this group to shrink when space is limited */
+    min-width: 0; /* allow children to truncate */
+    align-items: center;
 }
 
 .context-btn {
@@ -1004,6 +1010,18 @@ html, body {
     align-items: center;
     gap: 4px;
     transition: all 0.15s;
+    flex: 0 1 auto; /* Allow shrink if needed */
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.context-btn span {
+    display: inline-block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 140px;
 }
 
 .context-btn:hover {
@@ -1017,6 +1035,12 @@ html, body {
     border-color: rgba(9, 105, 218, 0.2);
 }
 
+/* Keep model select from expanding too much */
+.model-select-btn {
+    max-width: 160px;
+    min-width: 0;
+} 
+
 .send-btn {
     width: 28px;
     height: 28px;
@@ -1029,12 +1053,14 @@ html, body {
     align-items: center;
     justify-content: center;
     transition: all 0.15s;
+    flex: 0 0 auto; /* keep button fixed size and visible */
+    margin-left: 8px;
 }
 
 .send-btn:hover:not(:disabled) {
     background-color: var(--accent-hover);
     transform: scale(1.05);
-}
+} 
 
 .input-footer {
     margin-top: 12px;
@@ -1052,6 +1078,20 @@ html, body {
 
 .send-btn.stop:hover {
     background-color: #c0392b;
+}
+
+/* Responsive behavior: hide context label and reduce select on small widths */
+@container sidebar (max-width: 320px) {
+    .context-btn span {
+        display: none;
+    }
+    .model-select-btn {
+        max-width: 100px;
+        padding-right: 20px;
+    }
+    .left-controls {
+        gap: 2px;
+    }
 }
 
 .input-footer {
@@ -1315,6 +1355,8 @@ html, body {
     display: flex;
     align-items: center;
     margin-right: 9px;
+    flex: 0 1 auto;
+    min-width: 0;
 }
 
 .model-select-btn {
