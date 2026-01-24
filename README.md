@@ -31,38 +31,30 @@ OctoBrowser is a modern, Chromium-based web browser with GitHub Copilot SDK buil
 ## Screenshots
 
 ### Light Mode
-```
-+------------------------------------------------------------------+
-|  OctoBrowser                           [ - ] [ □ ] [ × ]         |
-+------------------------------------------------------------------+
-| [Tab 1] [Tab 2] [+]                                              |
-+------------------------------------------------------------------+
-| [←] [→] [↻] | 🔍 https://github.com                    [🐙] [☀] |
-+------------------------------------------------------------------+
-|                                      |                           |
-|                                      |  🐙 Copilot               |
-|        Browser Content               |  [Model: GPT-4.1 ▼] [🗑] |
-|                                      |                           |
-|                                      |  Welcome to OctoBrowser   |
-|                                      |                           |
-|                                      |  [📄 Summarize] [🔍 Search]|
-|                                      |                           |
-|                                      |  [Ask Copilot...]    [→]  |
-+------------------------------------------------------------------+
-```
+![Light Mode](assets/Screenshot%202026-01-23%20222438.png)
+
+### Dark Mode
+![Dark Mode](assets/Screenshot%202026-01-23%20222411.png)
+
+### Settings
+![Settings](assets/Screenshot%202026-01-23%20222525.png)
+
+### Chat History
+![Chat History](assets/Screenshot%202026-01-23%20222547.png)
 
 ## Prerequisites
 
 1. **Node.js** (v18 or later)
 2. **GitHub Copilot CLI** - Install from [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli)
-3. **GitHub Copilot Subscription** - Required for API access
+  3. ~~**GitHub Copilot Subscription** - Required for API access~~
+  A Copilot subscription is not required but you are limited to 50 chat requests.
 
 ## Installation
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/octobrowser.git
-cd octobrowser
+git clone https://github.com/HoppouAI/OctoBrowser.git
+cd OctoBrowser
 
 # Install dependencies
 npm install
@@ -91,7 +83,7 @@ npm run package
 - Use keyboard shortcuts: `Ctrl+T` (new tab), `Ctrl+W` (close tab), `Ctrl+L` (focus URL)
 
 ### AI Assistant
-- Click the Copilot icon in the toolbar to toggle the AI sidebar
+- Click the Hamburger menu icon in the toolbar to toggle the AI sidebar (or press ctrl+shift+i)
 - Type your question in the chat input
 - Click the book icon to include the current page content in your question
 - Select different AI models from the dropdown
@@ -100,28 +92,7 @@ npm run package
 - "Summarize this page for me"
 - "What are the key points in this article?"
 - "Search for the latest news about AI"
-- "Explain what this code does" (on a GitHub page)
 - "Help me find documentation for React hooks"
-
-## Architecture
-
-```
-OctoBrowser
-├── src/
-│   ├── main/           # Electron main process
-│   │   ├── main.ts           # App entry point
-│   │   ├── copilot-service.ts # Copilot SDK integration
-│   │   ├── tab-manager.ts     # Browser tab management
-│   │   └── settings-store.ts  # User preferences
-│   ├── preload/        # Preload scripts for IPC
-│   │   └── preload.ts
-│   └── renderer/       # Browser UI
-│       ├── index.html
-│       ├── styles.css
-│       └── app.js
-├── assets/             # Icons and images
-└── dist/               # Compiled output
-```
 
 ## Technologies
 
@@ -139,6 +110,7 @@ OctoBrowser
 | `Ctrl+W` | Close Tab |
 | `Ctrl+L` | Focus URL Bar |
 | `Ctrl+R` | Reload Page |
+| `Ctrl+Shift+I` | Toggle Copilot Sidebar |
 | `Enter` | Navigate/Send Message |
 
 ## Configuration
@@ -151,7 +123,8 @@ Settings are automatically saved and include:
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+~~Contributions are welcome! Please feel free to submit a Pull Request.~~
+We will probably archive this after the challenge is over as it was just a temporary fun side project for the competition.
 
 ## License
 
@@ -159,12 +132,19 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 ## Credits
 
-Built with ❤️ for the GitHub Copilot SDK Weekend Contest
+Built with ❤️ for the GitHub Copilot SDK Weekend Contest using Various Models in GitHub Copilot.
+Models Used to build this:
+- Gemini 3 Pro
+- Raptor Mini
+- Claude Opus 4.5
+and some of our own brain...
 
+## Acknowledgements
 - [GitHub Copilot SDK](https://github.com/github/copilot-sdk)
 - [Electron](https://www.electronjs.org/)
 - [GitHub Primer Design](https://primer.style/)
-
+- [Scroll Bar](https://codepen.io/DevSkyler/pen/QWqOdmp)
+- [UBlock Origin Addon](https://github.com/gorhill/uBlock)
 ---
 
 <p align="center">
