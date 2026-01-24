@@ -139,6 +139,11 @@ Models Used to build this:
 - Claude Opus 4.5
 and some of our own brain...
 
+## Known Issues
+- Sometimes when clearing all chat historys, you may not be able to type a new prompt, click out of the app and then back in to fix it.
+- It may sometimes click the wrong links but i believe this is due to the computer/browser use knowladge of the Models, It happens more with GPT 4.1 and GPT 5 Mini than it does with Claude Haiku 4.5
+- When the model uses the screenshot tool it has to take the screenshot, cancel the current chat flow and send the image as a new prompt to continue as the Copilot SDK doesn't have a way to send images as tool responces as far as i could find, Meaning it WILL use a PREMIUM request each time a screenshot is taken, So i advise using the 0x models rather than the 0.33x one (Haiku 4.5) to save your premium requests. (maybe someone from GitHub can clarify if there is a way or update the SDK to allow this in the future?)
+
 ## Acknowledgements
 - [GitHub Copilot SDK](https://github.com/github/copilot-sdk)
 - [Electron](https://www.electronjs.org/)
