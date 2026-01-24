@@ -2,6 +2,10 @@
   "name": "octobrowser",
   "version": "1.0.0",
   "description": "OctoBrowser - AI-Powered Web Browser with GitHub Copilot SDK",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HoppouAI/OctoBrowser.git"
+  },
   "main": "dist/main/main.js",
   "scripts": {
     "dev": "concurrently \"npm run dev:main\" \"npm run dev:preload\" \"wait-on dist/main/main.js dist/preload/preload.js && electron .\"",
