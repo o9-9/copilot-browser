@@ -3,6 +3,26 @@
  * Uses dynamic imports for ES Module compatibility with CommonJS
  */
 
+import * as path from 'path';
+import * as fs from 'fs';
+import { execFileSync } from 'child_process';
+
+// Find system Node.js (not Electron's bundled one) for the Copilot CLI subprocess
+function getSystemNodePath(): string | null {
+    try {
+        const cmd = process.platform === 'win32' ? 'where.exe' : 'which';
+        const result = execFileSync(cmd, ['node'], { encoding: 'utf8', windowsHide: true });
+        const paths = result.trim().split(/\r?\n/);
+        for (const p of paths) {
+            const trimmed = p.trim();
+            if (trimmed && !trimmed.toLowerCase().includes('electron') && fs.existsSync(trimmed)) {
+                return trimmed;
+            }
+        }
+    } catch { /* system node not found */ }
+    return null;
+}
+
 interface LocalModelInfo {
     id: string;
     name?: string;
@@ -94,9 +114,26 @@ export class CopilotService {
                 return false;
             }
 
-            this.client = new CopilotClientClass({
-                logLevel: 'error',
-            });
+            // Resolve the Copilot CLI path from the SDK's dependencies
+            const sdkEntry = require.resolve('@github/copilot-sdk');
+            const copilotCliPath = path.join(path.dirname(sdkEntry), '..', '..', '..', 'copilot', 'index.js');
+
+            // The Copilot CLI requires Node.js 22.5+ (for node:sqlite).
+            // In Electron, process.execPath points to the Electron binary (Node 18),
+            // so we must use the system Node.js to spawn the CLI subprocess.
+            const systemNode = getSystemNodePath();
+            const clientOptions: any = { logLevel: 'error' };
+
+            if (systemNode) {
+                // Use system node as the executable, pass CLI script as an arg
+                clientOptions.cliPath = systemNode;
+                clientOptions.cliArgs = [copilotCliPath];
+            } else {
+                // Fallback: use the CLI path directly (may fail if Electron's Node is too old)
+                clientOptions.cliPath = copilotCliPath;
+            }
+
+            this.client = new CopilotClientClass(clientOptions);
 
             await this.client.start();
             this.isInitialized = true;
@@ -622,7 +659,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
                 },
             }),
             defineToolFn('browser_take_screenshot', {
-                description: 'Take a screenshot of the current page and get a detailed visual description. This gives you a structured view of what\'s on screen including all visible text, buttons, links, images, videos, and UI elements with their positions.',
+                description: 'Take a screenshot of the current page. Saves the image to disk and returns the file path. Use the built-in view tool to see the screenshot contents.',
                 skipPermission: true,
                 parameters: {
                     type: 'object',
@@ -635,23 +672,22 @@ Never use any tools or take any actions outside of the provided browser tools. Y
                         // Capture screenshot for user display
                         const dataUrl = await withTimeout(callbacks.takeScreenshot(), 10000);
                         if (dataUrl) {
-                            // Send the image to UI so user can see it
+                            // Send the image data to UI so user can see it in the chat
                             reportResult('browser_take_screenshot', dataUrl);
-                            
-                            // HOTWIRE: Save to file for potential view tool access
-                            if (callbacks.saveScreenshotToFile) {
-                                const filePath = await callbacks.saveScreenshotToFile();
-                                if (filePath) {
-                                    console.log(`Screenshot saved to: ${filePath}`);
-                                }
-                            }
-                        } else {
-                            reportResult('browser_take_screenshot', 'Screenshot captured (processing...)');
                         }
                         
-                        // HOTWIRE: Get structured visual description instead of relying on vision
-                        const visualDescription = await withTimeout(callbacks.getVisualDescription(), 10000);
+                        // Save screenshot to file so the built-in view tool can read it
+                        let filePath: string | null = null;
+                        if (callbacks.saveScreenshotToFile) {
+                            filePath = await callbacks.saveScreenshotToFile();
+                        }
                         
+                        if (filePath) {
+                            return `Screenshot saved to: ${filePath}\nUse the view tool to see the screenshot contents.`;
+                        }
+                        
+                        // Fallback to text description if file save failed
+                        const visualDescription = await withTimeout(callbacks.getVisualDescription(), 10000);
                         return visualDescription;
                     } catch (error: any) {
                         const msg = `Failed to screenshot: ${error.message || 'unknown error'}`;
@@ -1025,7 +1061,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
                 console.log('Stream event:', event.type);
                 resetIdleTimeout(); // Activity detected
                 
-                if (event.type === 'assistant.message_delta') {
+                if (event.type === 'assistant.message_delta' || event.type === 'assistant.streaming_delta') {
                     const delta = (event.data as { deltaContent?: string }).deltaContent || '';
                     if (delta) {
                         fullContent += delta;
