@@ -47,6 +47,7 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 10000): Promise
 // Store SDK module references
 let CopilotClientClass: any = null;
 let defineToolFn: any = null;
+let approveAllFn: any = null;
 let sdkLoaded: boolean = false;
 
 // Helper to load the SDK dynamically using eval to bypass TypeScript's static analysis
@@ -59,6 +60,7 @@ async function loadSDK(): Promise<boolean> {
         const sdk = await importFn('@github/copilot-sdk');
         CopilotClientClass = sdk.CopilotClient;
         defineToolFn = sdk.defineTool;
+        approveAllFn = sdk.approveAll;
         sdkLoaded = true;
         return true;
     } catch (error) {
@@ -121,7 +123,7 @@ export class CopilotService {
         // Destroy existing session
         if (this.session) {
             try {
-                await this.session.destroy();
+                await this.session.disconnect();
             } catch (e) {
                 // Ignore cleanup errors
             }
@@ -137,7 +139,9 @@ export class CopilotService {
             model: model || this.currentModel,
             streaming: true,
             tools,
+            onPermissionRequest: approveAllFn,
             systemMessage: {
+                mode: 'replace',
                 content: `
 <context>
 You are OctoBrowser's AI assistant, powered by GitHub Copilot.
@@ -229,6 +233,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
         return [
             defineToolFn('browser_get_page_content', {
                 description: 'Get the content/text of the currently active web page in the browser. Use this when the user asks about the page they are viewing.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -255,6 +260,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_search_web', {
                 description: 'Search the web using Google. Use this for general web searches.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -281,6 +287,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_search_youtube', {
                 description: 'Search for videos on YouTube. Use this when the user wants to search for videos or content on YouTube specifically.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -307,6 +314,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_open_url', {
                 description: 'Open a URL in the browser. Can open in the current tab or a new tab.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -339,6 +347,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_get_open_tabs', {
                 description: 'Get a list of all currently open tabs with their IDs, titles, and URLs.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -369,6 +378,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_close_tabs', {
                 description: 'Close one or more browser tabs by their IDs.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -400,6 +410,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_click_element', {
                 description: 'Click on an element on the page using a CSS selector. Use this when you know the specific DOM structure or ID.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -426,6 +437,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_click_text', {
                 description: 'Click on an element containing specific text. useful when you see text on the page but don\'t know the CSS selector.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -452,6 +464,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_type_text', {
                 description: 'Type text into an input field. Optionally specify a CSS selector to focus first.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -482,6 +495,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_press_key', {
                 description: 'Press a specific key or key combination (e.g., "Enter", "Tab", "ArrowDown", "Control+C"). Use this for navigation, shortcuts, or submitting forms without a submit button.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -508,6 +522,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_find_in_page', {
                 description: 'Find and highlight text on the current page.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -536,6 +551,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_scroll_page', {
                 description: 'Scroll the page up, down, to top, or to bottom.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -563,6 +579,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_go_back', {
                 description: 'Navigate back in browser history.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -584,6 +601,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_go_forward', {
                 description: 'Navigate forward in browser history.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -605,6 +623,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_take_screenshot', {
                 description: 'Take a screenshot of the current page and get a detailed visual description. This gives you a structured view of what\'s on screen including all visible text, buttons, links, images, videos, and UI elements with their positions.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -643,6 +662,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_wait', {
                 description: 'Wait for a specific duration or for an element to appear on the page.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -675,6 +695,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_report_intent', {
                 description: 'Report the intent of the current action to the user.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -696,6 +717,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_ask_questions', {
                 description: 'Ask the user questions to clarify intent, validate assumptions, or choose between implementation approaches. Use this when you are stuck or need user input to proceed.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -762,6 +784,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_get_links', {
                 description: 'Get all clickable links and buttons on the current page. Returns an array of items with text, URL, and type. Essential for finding YouTube video links or navigation options.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {},
@@ -800,6 +823,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_click_video', {
                 description: 'Click on a YouTube video result by its number/index. Use after browser_get_links to click the correct video.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -828,6 +852,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
             }),
             defineToolFn('browser_search_text', {
                 description: 'Search for text on the page (case-insensitive). Returns matching text snippets. Use this to verify content exists before clicking.',
+                skipPermission: true,
                 parameters: {
                     type: 'object',
                     properties: {
@@ -1162,7 +1187,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
         // Destroy existing session and create a fresh one
         if (this.session) {
             try {
-                await this.session.destroy();
+                await this.session.disconnect();
             } catch (e) {
                 // Ignore session cleanup errors
             }
@@ -1195,7 +1220,7 @@ Never use any tools or take any actions outside of the provided browser tools. Y
         try {
             if (this.session) {
                 try {
-                    await this.session.destroy();
+                    await this.session.disconnect();
                 } catch (e) {
                     // Ignore session cleanup errors
                 }

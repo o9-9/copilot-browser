@@ -1,4 +1,4 @@
-name: Build
+name: Build & Release
 
 on:
   push:
@@ -24,7 +24,7 @@ on:
       prerelease:
         description: 'Mark as prerelease (true/false)'
         required: false
-        default: 'false' 
+        default: 'false'
 
 jobs:
   build:
@@ -33,6 +33,7 @@ jobs:
     permissions:
       contents: write
     strategy:
+      fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
@@ -47,26 +48,26 @@ jobs:
           cache: 'npm'
 
       - name: Install Dependencies
-        run: npm install
+        run: npm ci
 
       - name: Build TypeScript
         run: npm run build
 
-      - name: Build & Release (Windows)
+      - name: Package (Windows)
         if: runner.os == 'Windows'
-        run: npm run package:win -- -p always
+        run: npx electron-builder --win --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Release (macOS)
+      - name: Package (macOS)
         if: runner.os == 'macOS'
-        run: npm run package:mac -- -p always
+        run: npx electron-builder --mac --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & Release (Linux)
+      - name: Package (Linux)
         if: runner.os == 'Linux'
-        run: npm run package:linux -- -p always
+        run: npx electron-builder --linux --publish never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -76,5 +77,54 @@ jobs:
           name: OctoBrowser-${{ runner.os }}
           path: |
             release/*.exe
+            release/*.blockmap
             release/*.dmg
+            release/*.zip
             release/*.AppImage
+            release/*.yml
+            release/*.yaml
+          if-no-files-found: warn
+
+  release:
+    name: Create Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event.inputs.release_tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ github.event.inputs.release_name || steps.tag.outputs.tag }}
+          body: ${{ github.event.inputs.release_body || '' }}
+          draft: ${{ github.event.inputs.draft == 'true' }}
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.blockmap
+            artifacts/**/*.dmg
+            artifacts/**/*.zip
+            artifacts/**/*.AppImage
+            artifacts/**/*.yml
+            artifacts/**/*.yaml
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
